@@ -213,21 +213,17 @@ class _EditorPageState extends State<EditorPage>
 
     final double pixelRatio = _outputSize / _captureLogicalSize;
     final ui.Image image = await boundary.toImage(pixelRatio: pixelRatio);
-    final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-    if (byteData == null) {
-      throw Exception('تعذر التقاط الفريم.');
-    }
+    final ByteData? byteData =
+        await image.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) throw Exception('تعذر التقاط الفريم.');
     return byteData.buffer.asUint8List();
   }
 
-  Future<List<File>> _renderFrames(Directory folder) async {
+  Future<void> _renderFrames(Directory folder) async {
     final Uint8List? display = _processedBytes ?? _originalBytes;
-    if (display == null) {
-      throw Exception('اختر صورة أولاً.');
-    }
+    if (display == null) throw Exception('اختر صورة أولاً.');
 
     final int frameCount = (_fps * _durationSeconds).clamp(24, 720);
-    final List<File> files = <File>[];
 
     for (int i = 0; i < frameCount; i++) {
       final double angle = (2 * math.pi * i) / frameCount;
@@ -242,12 +238,8 @@ class _EditorPageState extends State<EditorPage>
       final Uint8List png = await _captureCurrentFramePng();
       final String framePath =
           '${folder.path}/frame_${i.toString().padLeft(4, '0')}.png';
-      final File frameFile = File(framePath);
-      await frameFile.writeAsBytes(png);
-      files.add(frameFile);
+      await File(framePath).writeAsBytes(png);
     }
-
-    return files;
   }
 
   Future<void> _exportGif() async {
@@ -264,28 +256,32 @@ class _EditorPageState extends State<EditorPage>
           Directory('${tmp.path}/holo_frames_gif_${DateTime.now().millisecondsSinceEpoch}');
       await framesDir.create(recursive: true);
 
-      final List<File> frames = await _renderFrames(framesDir);
+      await _renderFrames(framesDir);
 
-      final img.Animation animation = img.Animation();
-      for (final File frame in frames) {
-        final img.Image? decoded = img.decodePng(await frame.readAsBytes());
-        if (decoded != null) {
-          animation.addFrame(decoded, duration: (1000 / _fps).round());
-        }
-      }
-
-      final List<int> gifBytes = img.encodeGifAnimation(animation);
       final Directory docs = await getApplicationDocumentsDirectory();
       final String outPath =
           '${docs.path}/mustans_holo_${DateTime.now().millisecondsSinceEpoch}.gif';
-      final File out = File(outPath);
-      await out.writeAsBytes(gifBytes);
 
-      await Gal.putImage(outPath);
+      final String inputPattern =
+          '${framesDir.path}/frame_%04d.png'.replaceAll('\\', '/');
+      final String outputPath = outPath.replaceAll('\\', '/');
 
-      setState(() {
-        _status = 'تم تصدير GIF وحفظه في المعرض.';
-      });
+      final String cmd = '-y -framerate $_fps -i "$inputPattern" '
+          '-vf "fps=$_fps,scale=$_outputSize:-1:flags=lanczos" '
+          '"$outputPath"';
+
+      final session = await FFmpegKit.execute(cmd);
+      final returnCode = await session.getReturnCode();
+
+      if (ReturnCode.isSuccess(returnCode)) {
+        await Gal.putImage(outPath);
+        setState(() {
+          _status = 'تم تصدير GIF وحفظه في المعرض.';
+        });
+      } else {
+        final logs = await session.getAllLogsAsString();
+        throw Exception('FFmpeg GIF failed: $logs');
+      }
     } catch (e) {
       setState(() {
         _status = 'فشل تصدير GIF: $e';
@@ -317,7 +313,8 @@ class _EditorPageState extends State<EditorPage>
       final String outPath =
           '${docs.path}/mustans_holo_${DateTime.now().millisecondsSinceEpoch}.mp4';
 
-      final String inputPattern = '${framesDir.path}/frame_%04d.png'.replaceAll('\\', '/');
+      final String inputPattern =
+          '${framesDir.path}/frame_%04d.png'.replaceAll('\\', '/');
       final String outputPath = outPath.replaceAll('\\', '/');
 
       final String cmd =
@@ -333,7 +330,7 @@ class _EditorPageState extends State<EditorPage>
         });
       } else {
         final logs = await session.getAllLogsAsString();
-        throw Exception('FFmpeg failed: $logs');
+        throw Exception('FFmpeg MP4 failed: $logs');
       }
     } catch (e) {
       setState(() {
