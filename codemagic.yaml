@@ -1,0 +1,15 @@
+workflows:
+  android-release:
+    name: Android Release AAB
+    environment:
+      flutter: stable
+    scripts:
+      - name: Prepare Flutter project
+        script: |
+          flutter create --platforms=android --org com.mustans.holo360app .
+          flutter pub get
+      - name: Build AAB
+        script: |
+          flutter build appbundle --release
+    artifacts:
+      - build/**/outputs/**/*.aab
