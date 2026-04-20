@@ -3,8 +3,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:ffmpeg_kit_flutter_min_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_min_gpl/return_code.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:gal/gal.dart';
@@ -258,30 +256,37 @@ class _EditorPageState extends State<EditorPage>
 
       await _renderFrames(framesDir);
 
+      final img.GifEncoder encoder = img.GifEncoder(repeat: 0);
+      final int frameCount = (_fps * _durationSeconds).clamp(24, 720);
+
+      for (int i = 0; i < frameCount; i++) {
+        final String framePath =
+            '${framesDir.path}/frame_${i.toString().padLeft(4, '0')}.png';
+        final File frameFile = File(framePath);
+        if (await frameFile.exists()) {
+          final img.Image? frame = img.decodePng(await frameFile.readAsBytes());
+          if (frame != null) {
+            encoder.addFrame(frame, duration: (1000 / _fps).round());
+          }
+        }
+      }
+
+      final List<int>? gifBytes = encoder.finish();
+      if (gifBytes == null) {
+        throw Exception('تعذر إنشاء GIF');
+      }
+
       final Directory docs = await getApplicationDocumentsDirectory();
       final String outPath =
           '${docs.path}/mustans_holo_${DateTime.now().millisecondsSinceEpoch}.gif';
 
-      final String inputPattern =
-          '${framesDir.path}/frame_%04d.png'.replaceAll('\\', '/');
-      final String outputPath = outPath.replaceAll('\\', '/');
+      final File out = File(outPath);
+      await out.writeAsBytes(gifBytes);
+      await Gal.putImage(outPath);
 
-      final String cmd = '-y -framerate $_fps -i "$inputPattern" '
-          '-vf "fps=$_fps,scale=$_outputSize:-1:flags=lanczos" '
-          '"$outputPath"';
-
-      final session = await FFmpegKit.execute(cmd);
-      final returnCode = await session.getReturnCode();
-
-      if (ReturnCode.isSuccess(returnCode)) {
-        await Gal.putImage(outPath);
-        setState(() {
-          _status = 'تم تصدير GIF وحفظه في المعرض.';
-        });
-      } else {
-        final logs = await session.getAllLogsAsString();
-        throw Exception('FFmpeg GIF failed: $logs');
-      }
+      setState(() {
+        _status = 'تم تصدير GIF وحفظه في المعرض.';
+      });
     } catch (e) {
       setState(() {
         _status = 'فشل تصدير GIF: $e';
@@ -294,53 +299,9 @@ class _EditorPageState extends State<EditorPage>
   }
 
   Future<void> _exportMp4() async {
-    if (_isBusy) return;
-
     setState(() {
-      _isBusy = true;
-      _status = 'بدء تصدير MP4...';
+      _status = 'تصدير MP4 متوقف مؤقتًا في نسخة النشر السحابي الحالية.';
     });
-
-    try {
-      final Directory tmp = await getTemporaryDirectory();
-      final Directory framesDir =
-          Directory('${tmp.path}/holo_frames_mp4_${DateTime.now().millisecondsSinceEpoch}');
-      await framesDir.create(recursive: true);
-
-      await _renderFrames(framesDir);
-
-      final Directory docs = await getApplicationDocumentsDirectory();
-      final String outPath =
-          '${docs.path}/mustans_holo_${DateTime.now().millisecondsSinceEpoch}.mp4';
-
-      final String inputPattern =
-          '${framesDir.path}/frame_%04d.png'.replaceAll('\\', '/');
-      final String outputPath = outPath.replaceAll('\\', '/');
-
-      final String cmd =
-          '-y -framerate $_fps -i "$inputPattern" -c:v libx264 -pix_fmt yuv420p -crf 18 "$outputPath"';
-
-      final session = await FFmpegKit.execute(cmd);
-      final returnCode = await session.getReturnCode();
-
-      if (ReturnCode.isSuccess(returnCode)) {
-        await Gal.putVideo(outPath);
-        setState(() {
-          _status = 'تم تصدير فيديو MP4 وحفظه في المعرض.';
-        });
-      } else {
-        final logs = await session.getAllLogsAsString();
-        throw Exception('FFmpeg MP4 failed: $logs');
-      }
-    } catch (e) {
-      setState(() {
-        _status = 'فشل تصدير MP4: $e';
-      });
-    } finally {
-      setState(() {
-        _isBusy = false;
-      });
-    }
   }
 
   @override
